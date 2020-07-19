@@ -1,0 +1,32 @@
+{
+    "configurations": [
+        {
+            "name": "Win32",
+            "includePath": [
+                "C:\\Users\\Alex\\AppData\\Local\\Arduino15\\packages\\sandeepmistry\\tools\\**",
+                "C:\\Users\\Alex\\AppData\\Local\\Arduino15\\packages\\sandeepmistry\\hardware\\nRF5\\0.6.0\\**",
+                "C:\\Users\\Alex\\AppData\\Local\\Arduino15\\packages\\MySensors\\hardware\\nRF5\\0.3.0\\**",
+                "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\mysEfektaLib\\**",
+                "${workspaceRoot}"
+            ],
+            "browse": {
+                "limitSymbolsToIncludedHeaders": false,
+                "path": [
+                    "${workspaceFolder}\\**",
+                    "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\MySensors\\**",
+                    "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\DallasTemperature\\**",
+                    "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\OneWire\\**",
+                    "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\BH1750FVI\\**",
+                    "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\mysEfektaLib\\**",
+                    "C:\\Users\\Alex\\AppData\\Local\\Arduino15\\packages\\sandeepmistry\\hardware\\nRF5\\0.6.0\\cores\\nRF5\\SDK\\components\\device\\"
+                ]
+            },
+            "forcedInclude": [],
+            "intelliSenseMode": "msvc-x64",
+            "compilerPath": "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/14.24.28314/bin/Hostx64/x64/cl.exe",
+            "cStandard": "c11",
+            "cppStandard": "c++17"
+        }
+    ],
+    "version": 4
+}

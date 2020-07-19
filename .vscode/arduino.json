@@ -1,0 +1,8 @@
+{
+    "board": "MySensors:nRF5:MyBoard_nRF52832",
+    "output": "./.output",
+    "configuration": "bootcode=none,lfclk=lfxo,reset=notenable",
+    "sketch": "mysUniSensor.ino",
+    "port": "COM15",
+    "programmer": "J-Link"
+}
