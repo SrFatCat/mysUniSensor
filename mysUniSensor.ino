@@ -17,6 +17,7 @@
 #endif
 
 #define MY_NODE_ID 11
+#define MY_PARENT_NODE_ID 50
 #define MY_RADIO_NRF5_ESB
 
 int16_t myTransportComlpeteMS;
@@ -33,17 +34,9 @@ int16_t myTransportComlpeteMS;
 #include <Wire.h>
 #include <BH1750FVI.h>
 
-#define my_wdt_enable(timeout) \
-	NRF_WDT->CONFIG = NRF_WDT->CONFIG = (WDT_CONFIG_HALT_Pause << WDT_CONFIG_HALT_Pos) | ( WDT_CONFIG_SLEEP_Run << WDT_CONFIG_SLEEP_Pos); \
-	NRF_WDT->CRV = (timeout); \
-	NRF_WDT->RREN |= WDT_RREN_RR0_Msk;  \
-	NRF_WDT->TASKS_START = 1
-
-
-
 #define INTERVAL_MEASUREMENT 15*60000UL //15 min
-#define INTERVAL_PIR_COOLING 60000UL
-#define INTERVAL_WDT 0x0039C8B4//(INTERVAL_MEASUREMENT + 2000UL)*32768UL/1000UL
+#define INTERVAL_PIR_COOLING 30000UL
+#define INTERVAL_WDT 100000//(INTERVAL_MEASUREMENT + 2000UL)*32768UL/1000UL
 
 BH1750FVI LightSensor(BH1750FVI::k_DevModeOneTimeHighRes);
 
@@ -66,6 +59,14 @@ const uint8_t leds[] = {LED_R, LED_G, LED_B};
 void strongPresentation(); 
 CStrongNode strongNode(100, strongPresentation);
 CDream interruptedSleep(1); // количество пинов по которым будут прерывания сна
+
+void powerManagment(){
+	CORE_DEBUG("*************** SQ: %i%%\n", strongNode.getSignalQuality());
+	if (strongNode.getSignalQuality() > 25)
+		NRF_POWER->DCDCEN = 1;
+	else
+		NRF_POWER->DCDCEN = 0;
+}
 
 void errLed(uint8_t errNum){
 	if (errNum == 0) return;
@@ -123,7 +124,7 @@ uint8_t sendMeasurement() {
 }
 
 void before(){
-	my_wdt_enable(INTERVAL_WDT);
+	wdt_enable(INTERVAL_WDT);
 	for (int i = 0; i < 3; i++) {
 		hwPinMode(leds[i], OUTPUT);
 		digitalWrite(leds[i], LOW);
@@ -159,10 +160,7 @@ void setup() {
 	
 	sendMeasurement();
 	CORE_DEBUG("*************** SQ: %i%%\n", strongNode.getSignalQuality());
-	if (strongNode.getSignalQuality() > 25)
-		NRF_POWER->DCDCEN = 1;
-	else
-		NRF_POWER->DCDCEN = 0;
+	powerManagment();
 }
 
 void loop() {
@@ -170,13 +168,14 @@ void loop() {
 	static uint32_t measuremetInterval = INTERVAL_MEASUREMENT;
 
 	const uint32_t tSleepStart = millis();
-	const int8_t wakeupReson = interruptedSleep.run(measuremetInterval > INTERVAL_MEASUREMENT ? measuremetInterval = INTERVAL_MEASUREMENT : measuremetInterval);
-	wdt_reset();
+	// const int8_t wakeupReson = interruptedSleep.run(measuremetInterval > INTERVAL_MEASUREMENT ? measuremetInterval = INTERVAL_MEASUREMENT : measuremetInterval);
+	// wdt_reset();
+	const int8_t wakeupReson = interruptedSleep.run(measuremetInterval > INTERVAL_MEASUREMENT ? measuremetInterval = INTERVAL_MEASUREMENT : measuremetInterval, INTERVAL_WDT, false);
 	if (wakeupReson == MY_WAKE_UP_BY_TIMER){
         CORE_DEBUG("*************** WAKE_UP_BY_TIMER\n");
 		if (!isSendMotionOFF) isSendMotionOFF = strongNode.sendMsg(msgMotion.set(false), 5); //если раньше не удалось отправить PIR в 0 повторяем
 		sendMeasurement();
-		CORE_DEBUG("*************** SQ: %i%%\n", strongNode.getSignalQuality());
+		powerManagment();
 		measuremetInterval = INTERVAL_MEASUREMENT;
     }
 	else {
@@ -190,8 +189,9 @@ void loop() {
 		errLed(!sendOk);
 		interruptedSleep.disableInterrupt();
 		while(digitalRead(PIR_PIN)) {
-			interruptedSleep.run(INTERVAL_PIR_COOLING);
-			wdt_reset();
+			interruptedSleep.run(INTERVAL_PIR_COOLING, INTERVAL_WDT, false);
+			// interruptedSleep.run(INTERVAL_PIR_COOLING);
+			// wdt_reset();
 			if (measuremetInterval <= INTERVAL_PIR_COOLING) {
 				sendMeasurement();
 				measuremetInterval = INTERVAL_MEASUREMENT;	
