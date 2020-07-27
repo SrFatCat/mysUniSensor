@@ -34,9 +34,10 @@ int16_t myTransportComlpeteMS;
 #include <Wire.h>
 #include <BH1750FVI.h>
 
-#define INTERVAL_MEASUREMENT 15*60000UL //15 min
+#define INTERVAL_MEASUREMENT (15*60000UL) //15 min
 #define INTERVAL_PIR_COOLING 30000UL
-#define INTERVAL_WDT 100000//(INTERVAL_MEASUREMENT + 2000UL)*32768UL/1000UL
+#define MAX_INTERVAL_PIR_COOLING (4 * INTERVAL_PIR_COOLING)
+#define INTERVAL_WDT 100000
 
 BH1750FVI LightSensor(BH1750FVI::k_DevModeOneTimeHighRes);
 
@@ -84,6 +85,7 @@ uint8_t sendMeasurement() {
 	static float pTemperature = -127.0;
 	static uint16_t pLight = 0xFFFF; 
 	int ret = 0;
+	bool isSendTemp = false;
 
 	digitalWrite(LED_G, LOW);
 	
@@ -98,6 +100,7 @@ uint8_t sendMeasurement() {
 	 	CORE_DEBUG("*************** Temperature = %3.1f\n", temperature);
 		if (pTemperature != temperature ) {
 			if (strongNode.sendMsg(msgTemp.set(temperature, 1))) pTemperature = temperature; else ret++;
+			isSendTemp = true;
 		}
 			
 	}
@@ -109,13 +112,16 @@ uint8_t sendMeasurement() {
 	LightSensor.SetMode(BH1750FVI::k_DevModeOneTimeHighRes);
 	wait(500);
 	uint16_t light = LightSensor.GetLightIntensity();
+	LightSensor.Sleep();
+	if (isSendTemp) strongNode.takeVoltage();
+
 	CORE_DEBUG("*************** Light intensity = %i LUX\n", light);
 	if (light != pLight) {
 		if(strongNode.sendMsg(msgLight.set(light))) pLight = light; else ret++;
+		if (!isSendTemp) strongNode.takeVoltage();
 	}
-	LightSensor.Sleep();
 
-	strongNode.sendSignalStrength();
+	//strongNode.sendSignalStrength();
 	strongNode.sendBattery();
 
 	errLed(ret);
@@ -149,58 +155,63 @@ void setup() {
 	
 	interruptedSleep.addPin(PIR_PIN, NRF_GPIO_PIN_NOPULL, CDream::NRF_PIN_LOW_TO_HIGH); // добавляем описание пинов
 	interruptedSleep.init();
-
+	
 	strongNode.setup();
-
+	
+	NRF_POWER->DCDCEN = 1;
 
 	ds18b20.begin();
 	ds18b20.setResolution(12);
 	ds18b20.setWaitForConversion(false);
 	LightSensor.begin();
-	
+	// while(1){
+	// 	sendMeasurement();
+	// 	sleep(5000);
+	// 	wdt_reset();
+	// }
 	sendMeasurement();
 	CORE_DEBUG("*************** SQ: %i%%\n", strongNode.getSignalQuality());
-	powerManagment();
+	//powerManagment();
 }
 
 void loop() {
 	static bool isSendMotionOFF = true;
 	static uint32_t measuremetInterval = INTERVAL_MEASUREMENT;
+	static uint32_t intervalPirCooling = 0;
+	static uint32_t tCoolingStart = 0;
 
 	const uint32_t tSleepStart = millis();
-	// const int8_t wakeupReson = interruptedSleep.run(measuremetInterval > INTERVAL_MEASUREMENT ? measuremetInterval = INTERVAL_MEASUREMENT : measuremetInterval);
-	// wdt_reset();
+
 	const int8_t wakeupReson = interruptedSleep.run(measuremetInterval > INTERVAL_MEASUREMENT ? measuremetInterval = INTERVAL_MEASUREMENT : measuremetInterval, INTERVAL_WDT, false);
 	if (wakeupReson == MY_WAKE_UP_BY_TIMER){
         CORE_DEBUG("*************** WAKE_UP_BY_TIMER\n");
-		if (!isSendMotionOFF) isSendMotionOFF = strongNode.sendMsg(msgMotion.set(false), 5); //если раньше не удалось отправить PIR в 0 повторяем
+		//if (!isSendMotionOFF) isSendMotionOFF = strongNode.sendMsg(msgMotion.set(false), 5); //если раньше не удалось отправить PIR в 0 повторяем
 		sendMeasurement();
-		powerManagment();
+		//powerManagment();
 		measuremetInterval = INTERVAL_MEASUREMENT;
     }
 	else {
-		measuremetInterval -= (millis() - tSleepStart); // скока времени еще спать до измерения
+		const uint32_t t = millis();
+		measuremetInterval -= (t - tSleepStart); // скока времени еще спать до измерения
 		if (measuremetInterval > INTERVAL_MEASUREMENT)  measuremetInterval = INTERVAL_MEASUREMENT; // защита от переполнения беззнакового
-		CORE_DEBUG("*************** WAKE_UP_BY %i, TIMER remain %i of %i\n", wakeupReson, measuremetInterval, INTERVAL_MEASUREMENT);
-		digitalWrite(LED_B, LOW);
-		wait(50);
-		digitalWrite(LED_B, HIGH);
-		bool sendOk = strongNode.sendMsg(msgMotion.set(true), 5);
-		errLed(!sendOk);
-		interruptedSleep.disableInterrupt();
-		while(digitalRead(PIR_PIN)) {
-			interruptedSleep.run(INTERVAL_PIR_COOLING, INTERVAL_WDT, false);
-			// interruptedSleep.run(INTERVAL_PIR_COOLING);
-			// wdt_reset();
-			if (measuremetInterval <= INTERVAL_PIR_COOLING) {
-				sendMeasurement();
-				measuremetInterval = INTERVAL_MEASUREMENT;	
+		if (intervalPirCooling == 0 || (t - tCoolingStart) > intervalPirCooling){ // если проснулись первый раз или после остывания
+			digitalWrite(LED_B, LOW);
+			wait(50);
+			digitalWrite(LED_B, HIGH);	
+			bool sendOk = strongNode.sendMsg(msgMotion.set(true), 5);
+			errLed(!sendOk);
+			if (sendOk){
+				 intervalPirCooling = INTERVAL_PIR_COOLING;
+				 tCoolingStart = t;
 			}
-			else measuremetInterval -=INTERVAL_PIR_COOLING;
-		}			
-		if (sendOk) isSendMotionOFF = strongNode.sendMsg(msgMotion.set(false), 5);
-		errLed(isSendMotionOFF ? 0 : 2);
-		interruptedSleep.enableInterrupt();
+			if(!sendOk && ((t - tCoolingStart) > intervalPirCooling)) intervalPirCooling = 0;
+		}
+		else {
+			intervalPirCooling += INTERVAL_PIR_COOLING;
+			if (intervalPirCooling > MAX_INTERVAL_PIR_COOLING) intervalPirCooling = MAX_INTERVAL_PIR_COOLING;
+			tCoolingStart = t;
+		} 
+		CORE_DEBUG("*************** WAKE_UP_BY %i, time remain %i of %i, PIR COOLING %i of %i \n", wakeupReson,  measuremetInterval, INTERVAL_MEASUREMENT, (t - tCoolingStart), intervalPirCooling);
 	}
 }
 
