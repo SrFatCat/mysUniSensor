@@ -24,7 +24,7 @@ int16_t myTransportComlpeteMS;
 #define MY_TRANSPORT_WAIT_READY_MS (myTransportComlpeteMS)
 #define MY_SEND_RESET_REASON 252
 #define MY_SEND_BATTERY 253
-#define MY_SEND_RSSI 254
+//#define MY_SEND_RSSI 254
 
 #include <DallasTemperature.h>
 #include <OneWire.h>
@@ -193,7 +193,7 @@ void loop() {
 	else {
 		const uint32_t t = millis();
 		measuremetInterval -= (t - tSleepStart); // скока времени еще спать до измерения
-		if (measuremetInterval > INTERVAL_MEASUREMENT)  measuremetInterval = INTERVAL_MEASUREMENT; // защита от переполнения беззнакового
+		//if (measuremetInterval > INTERVAL_MEASUREMENT)  measuremetInterval = INTERVAL_MEASUREMENT; // защита от переполнения беззнакового
 		if (intervalPirCooling == 0 || (t - tCoolingStart) > intervalPirCooling){ // если проснулись первый раз или после остывания
 			digitalWrite(LED_B, LOW);
 			wait(50);
