@@ -128,6 +128,10 @@ void before(){
 	}
 	hwPinMode(PIR_PIN, INPUT);
 	strongNode.before();
+	NRF_NFCT->TASKS_DISABLE = 1;
+    NRF_NVMC->CONFIG = 1;
+    NRF_UICR->NFCPINS = 0;
+    NRF_NVMC->CONFIG = 0;
 }
 
 void strongPresentation() {
@@ -149,11 +153,16 @@ void setup() {
 	
 	strongNode.setup();
 	
-	//NRF_POWER->DCDCEN = 1;
+	NRF_POWER->DCDCEN = 1;
 
 	ds18b20.begin();
 	ds18b20.setResolution(12);
 	ds18b20.setWaitForConversion(false);
+
+	Wire.begin();
+	i2cScanner(); 
+	// wait(5000);
+
 //	LightSensor.begin();
 	sendMeasurement();
 	CORE_DEBUG("*************** SQ: %i%%\n", strongNode.getSignalQuality());
@@ -193,7 +202,6 @@ void receive(const MyMessage & message){
     if (strongNode.checkAck(message)) return;
 }
 
-/*
 int nDevices;
 
 void i2cScanner() {
@@ -208,7 +216,7 @@ void i2cScanner() {
 		// the Write.endTransmisstion to see if
 		// a device did acknowledge to the address.
 		Wire.beginTransmission(address);
-		//Serial.print("+");
+		Serial.print("+");
 		error = Wire.endTransmission();
 
 		if (error == 0)
@@ -228,12 +236,15 @@ void i2cScanner() {
 		CORE_DEBUG("\n***************%i device done\n\n", nDevices);
 }
 
+/*
 прежде всего модуль должен соответствовать схеме dc-dc, например для модулей от ебайта 52832 нужно допаивпть индуктивности, есть только выводы 
 на пады, на модулях от скайлаб 52840 есть места под индуктивности на модуле, там надо их туда допаивпть. а дальше все просто:
 NRF_POWER->DCDCEN = 1;
 
 причем иногда я его выключаю для презентации(NRF_POWER->DCDCEN = 0;) а потом опять включаю
+*/
 
+/*
 
 void startTimer(uint sec){
 	//NRF_TIMER1->POWER = 1;
