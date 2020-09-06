@@ -11,7 +11,7 @@
 #define MY_PROJECT_NAME "Uni sensor"
 #define MY_PROJECT_VERSION "1.2"
 
-#define MY_DEBUG
+//#define MY_DEBUG
 #ifndef MY_DEBUG
 #define MY_DISABLED_SERIAL
 #endif
@@ -26,20 +26,29 @@ int16_t myTransportComlpeteMS;
 #define MY_SEND_BATTERY 253
 //#define MY_SEND_RSSI 254
 
+
+//#define LIGHT_SENSOR_BH // определен - BH1750FVI, нет - MAX44009
 #include <DallasTemperature.h>
 #include <OneWire.h>
 #include <MySensors.h>
 #include <efektaGpiot.h>
 #include <strongNode.h>
 #include <Wire.h>
+#ifdef LIGHT_SENSOR_BH
 #include <BH1750FVI.h>
+#else
+#include <Max44009.h>
+#endif
 
 #define INTERVAL_MEASUREMENT 10000//(15*60000UL) //15 min
 #define INTERVAL_PIR_SEND 0//(15*60000UL) //15 min
 #define INTERVAL_WDT 100000
 
+#ifdef LIGHT_SENSOR_BH
 BH1750FVI LightSensor(BH1750FVI::k_DevModeOneTimeHighRes);
-
+#else
+Max44009 LightSensor(0x4A);
+#endif
 #define ONE_WIRE_BUS 12
 OneWire oneWire(ONE_WIRE_BUS); // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
 DallasTemperature ds18b20(&oneWire); // Pass the oneWire reference to Dallas Temperature. 
@@ -98,12 +107,21 @@ uint8_t sendMeasurement() {
 	else {
 		CORE_DEBUG("*************** ERR: not get temperature\n");
 	}
-	/*
+
+#ifdef LIGHT_SENSOR_BH
 	LightSensor.Reset();
 	LightSensor.SetMode(BH1750FVI::k_DevModeOneTimeHighRes);
 	wait(500);
 	uint16_t light = LightSensor.GetLightIntensity();
 	LightSensor.Sleep();
+#else
+	uint16_t light = LightSensor.getLux();
+	if (LightSensor.getError()) {
+		CORE_DEBUG("*************** Light sensor ERR = %i LUX\n", LightSensor.getError());
+		light = pLight;
+	}
+#endif
+
 	if (isSendTemp) strongNode.takeVoltage();
 
 	CORE_DEBUG("*************** Light intensity = %i LUX\n", light);
@@ -111,7 +129,7 @@ uint8_t sendMeasurement() {
 		if(strongNode.sendMsg(msgLight.set(light))) pLight = light; else ret++;
 		if (!isSendTemp) strongNode.takeVoltage();
 	}
-*/
+
 	//strongNode.sendSignalStrength();
 	strongNode.sendBattery();
 
@@ -128,10 +146,11 @@ void before(){
 	}
 	hwPinMode(PIR_PIN, INPUT);
 	strongNode.before();
+
 	NRF_NFCT->TASKS_DISABLE = 1;
-    NRF_NVMC->CONFIG = 1;
-    NRF_UICR->NFCPINS = 0;
-    NRF_NVMC->CONFIG = 0;
+	NRF_NVMC->CONFIG = 1;
+	NRF_UICR->NFCPINS = 0;
+	NRF_NVMC->CONFIG = 0;
 }
 
 void strongPresentation() {
@@ -159,11 +178,13 @@ void setup() {
 	ds18b20.setResolution(12);
 	ds18b20.setWaitForConversion(false);
 
+#ifdef LIGHT_SENSOR_BH
+	LightSensor.begin();
+#else
 	Wire.begin();
-	i2cScanner(); 
-	// wait(5000);
-
-//	LightSensor.begin();
+	LightSensor.setAutomaticMode();
+	//LightSensor.setContinuousMode();
+#endif	
 	sendMeasurement();
 	CORE_DEBUG("*************** SQ: %i%%\n", strongNode.getSignalQuality());
 	//powerManagment();
