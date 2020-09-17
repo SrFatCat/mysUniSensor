@@ -16,7 +16,7 @@
 #define MY_DISABLED_SERIAL
 #endif
 
-#define MY_NODE_ID 9
+#define MY_NODE_ID 11//9
 #define MY_PARENT_NODE_ID 50
 #define MY_RADIO_NRF5_ESB
 
@@ -27,7 +27,7 @@ int16_t myTransportComlpeteMS;
 //#define MY_SEND_RSSI 254
 
 
-//#define LIGHT_SENSOR_BH // определен - BH1750FVI, нет - MAX44009
+#define LIGHT_SENSOR_BH // определен - BH1750FVI, нет - MAX44009
 #include <DallasTemperature.h>
 #include <OneWire.h>
 #include <MySensors.h>
@@ -40,8 +40,8 @@ int16_t myTransportComlpeteMS;
 #include <Max44009.h>
 #endif
 
-#define INTERVAL_MEASUREMENT 10000//(15*60000UL) //15 min
-#define INTERVAL_PIR_SEND 0//(15*60000UL) //15 min
+#define INTERVAL_MEASUREMENT (15*60000UL) //15 min
+//#define INTERVAL_PIR_SEND (2 * 60000UL)//(15*60000UL) //15 min
 #define INTERVAL_WDT 100000
 
 #ifdef LIGHT_SENSOR_BH
@@ -81,18 +81,18 @@ void errLed(uint8_t errNum){
 	}
 }
 
-uint8_t sendMeasurement() {
+uint8_t sendMeasurement(bool enableLED = true) {
 	static float pTemperature = -127.0;
 	static uint16_t pLight = 0xFFFF; 
 	int ret = 0;
 	bool isSendTemp = false;
 
-	digitalWrite(LED_G, LOW);
+	if (enableLED) digitalWrite(LED_G, LOW);
 	
 	ds18b20.requestTemperatures();
 	int16_t conversionTime = ds18b20.millisToWaitForConversion(ds18b20.getResolution());
 	wait(50);
-	digitalWrite(LED_G, HIGH);
+	if (enableLED) digitalWrite(LED_G, HIGH);
 	if (conversionTime > 50) wait(conversionTime-50);
 
 	float temperature = ds18b20.getTempCByIndex(0);
@@ -122,24 +122,24 @@ uint8_t sendMeasurement() {
 	}
 #endif
 
-	if (isSendTemp) strongNode.takeVoltage();
+	if (isSendTemp && enableLED) strongNode.takeVoltage();
 
 	CORE_DEBUG("*************** Light intensity = %i LUX\n", light);
 	if (light != pLight) {
 		if(strongNode.sendMsg(msgLight.set(light))) pLight = light; else ret++;
-		if (!isSendTemp) strongNode.takeVoltage();
+		if (!isSendTemp && enableLED) strongNode.takeVoltage();
 	}
 
 	//strongNode.sendSignalStrength();
 	strongNode.sendBattery();
 
-	errLed(ret);
+	if (enableLED) errLed(ret);
 
 	return ret;
 }
 
 void before(){
-	//wdt_enable(INTERVAL_WDT);
+	wdt_enable(INTERVAL_WDT);
 	for (int i = 0; i < 3; i++) {
 		hwPinMode(leds[i], OUTPUT);
 		digitalWrite(leds[i], LOW);
@@ -167,7 +167,7 @@ void setup() {
 	wait(2000);
 	CORE_DEBUG("\n*************** Start NRF52 mysUniSensor *************** \n\n");
 	
-	interruptedSleep.addPin(PIR_PIN, NRF_GPIO_PIN_NOPULL, CDream::NRF_PIN_LOW_TO_HIGH); // добавляем описание пинов
+	interruptedSleep.addPin(PIR_PIN, NRF_GPIO_PIN_PULLDOWN, CDream::NRF_PIN_LOW_TO_HIGH); // добавляем описание пинов
 	interruptedSleep.init();
 	
 	strongNode.setup();
@@ -196,27 +196,57 @@ void loop() {
 	static uint32_t pirSendTime = 0;
 
 	const uint32_t tSleepStart = millis();
-
-	const int8_t wakeupReson = interruptedSleep.run(measuremetInterval > INTERVAL_MEASUREMENT ? measuremetInterval = INTERVAL_MEASUREMENT : measuremetInterval, INTERVAL_WDT, false);
-	if (wakeupReson == MY_WAKE_UP_BY_TIMER){
-        CORE_DEBUG("*************** WAKE_UP_BY_TIMER\n");
-		sendMeasurement();
-		measuremetInterval = INTERVAL_MEASUREMENT;
-    }
-	else {
-		const uint32_t t = millis();
-		measuremetInterval -= (t - tSleepStart); // скока времени еще спать до измерения
-		//if (measuremetInterval > INTERVAL_MEASUREMENT)  measuremetInterval = INTERVAL_MEASUREMENT; // защита от переполнения беззнакового
-		if (pirSendTime == 0 || t - pirSendTime > INTERVAL_PIR_SEND){ // если проснулись первый раз или после остывания
-			digitalWrite(LED_B, LOW);
-			wait(50);
-			digitalWrite(LED_B, HIGH);	
-			bool sendOk = strongNode.sendMsg(msgMotion.set(true), 5);
-			errLed(!sendOk);
-			if (sendOk) pirSendTime = t;
+	const int8_t wakeupReson = interruptedSleep.run(INTERVAL_MEASUREMENT, INTERVAL_WDT, false);
+	if (wakeupReson != MY_WAKE_UP_BY_TIMER){
+		CORE_DEBUG("*************** WAKE_UP_BY %i\n", wakeupReson);
+		digitalWrite(LED_B, LOW);
+		wait(50);
+		digitalWrite(LED_B, HIGH);	
+		bool sendOk = strongNode.sendMsg(msgMotion.set(true), 5);
+		if (!sendOk){
+			CORE_DEBUG("*************** try STRONG send\n", wakeupReson);
+			NRF_POWER->DCDCEN = 0;
+			wait(10);
+			sendOk = strongNode.sendMsg(msgMotion.set(true), 5);
+			NRF_POWER->DCDCEN = 1;
 		}
-		CORE_DEBUG("*************** WAKE_UP_BY %i, time remain %i of %i \n", wakeupReson,  measuremetInterval, INTERVAL_MEASUREMENT);
+		errLed(!sendOk);
+		if (sendOk)	interruptedSleep.disableInterrupt();
 	}
+	const uint32_t t = millis();
+	if (t - tSleepStart > INTERVAL_MEASUREMENT / 2 /*|| wakeupReson == MY_WAKE_UP_BY_TIMER*/){
+		sendMeasurement(wakeupReson == MY_WAKE_UP_BY_TIMER);
+	}
+	if (wakeupReson == MY_WAKE_UP_BY_TIMER){
+		 CORE_DEBUG("*************** WAKE_UP_BY_TIMER\n");
+		interruptedSleep.enableInterrupt();
+	}
+
+
+	// const int8_t wakeupReson = interruptedSleep.run(measuremetInterval > INTERVAL_MEASUREMENT ? measuremetInterval = INTERVAL_MEASUREMENT : measuremetInterval, INTERVAL_WDT, false);
+	// if (wakeupReson == MY_WAKE_UP_BY_TIMER){
+    //     CORE_DEBUG("*************** WAKE_UP_BY_TIMER\n");
+	// 	sendMeasurement();
+	// 	measuremetInterval = INTERVAL_MEASUREMENT;
+	// 	interruptedSleep.enableInterrupt();
+    // }
+	// else {
+	// 	const uint32_t t = millis();
+	// 	measuremetInterval -= (t - tSleepStart); // скока времени еще спать до измерения
+	// 	//if (measuremetInterval > INTERVAL_MEASUREMENT)  measuremetInterval = INTERVAL_MEASUREMENT; // защита от переполнения беззнакового
+	// 	//if (pirSendTime == 0 || t - pirSendTime > INTERVAL_PIR_SEND){ // если проснулись первый раз или после остывания
+	// 	digitalWrite(LED_B, LOW);
+	// 	wait(50);
+	// 	digitalWrite(LED_B, HIGH);	
+	// 	bool sendOk = strongNode.sendMsg(msgMotion.set(true), 5);
+	// 	errLed(!sendOk);
+	// 	if (sendOk){ 
+	// 		pirSendTime = t;
+	// 		interruptedSleep.disableInterrupt();
+	// 	}
+	// 	//}
+	// 	CORE_DEBUG("*************** WAKE_UP_BY %i, time remain %i of %i \n", wakeupReson,  measuremetInterval, INTERVAL_MEASUREMENT);
+	// }
 }
 
 void receive(const MyMessage & message){
