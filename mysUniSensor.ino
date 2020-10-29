@@ -1,7 +1,7 @@
 /*
  Name:		mysUniSensor.ino
  Created:	06.02.2020 
- Edited: 	06.05.2020
+ Edited: 	06.10.2020
  Author:	Alexey Bogdan aka Sr.FatCat
 
 Первая версия моей платки, пока только датчик температурки, датчик светика и немного движухи
@@ -11,7 +11,7 @@
 #define MY_PROJECT_NAME "Uni sensor"
 #define MY_PROJECT_VERSION "1.3"
 
-#define MY_DEBUG
+//#define MY_DEBUG
 #ifndef MY_DEBUG
 #define MY_DISABLED_SERIAL
 #endif
@@ -40,8 +40,8 @@ int16_t myTransportComlpeteMS;
 #include <Max44009.h>
 #endif
 
-#define INTERVAL_MEASUREMENT 20000//(15*60000UL) //15 min
-//#define INTERVAL_PIR_SEND (2 * 60000UL)//(15*60000UL) //15 min
+#define INTERVAL_MEASUREMENT (15*60000UL) //15 min
+//#define INTERVAL_PIR_SEND (2 * 60000UL) //2 min
 #define INTERVAL_WDT 100000
 
 #ifdef LIGHT_SENSOR_BH
@@ -53,11 +53,6 @@ Max44009 LightSensor(0x4A);
 #define ONE_WIRE_BUS 12
 OneWire oneWire(ONE_WIRE_BUS); // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
 DallasTemperature ds18b20(&oneWire); // Pass the oneWire reference to Dallas Temperature. 
-
-#define PIN_CCS811_WAKE 2
-#define PIN_CCS811_RESET 4
-#include "Adafruit_CCS811.h"
-Adafruit_CCS811 ccs;
 
 #define CHILD_ID_TEMP 1
 #define CHILD_ID_MOTION 2
@@ -151,8 +146,6 @@ void before(){
 		digitalWrite(leds[i], LOW);
 	}
 	hwPinMode(PIR_PIN, INPUT);
-	hwPinMode(PIN_CCS811_WAKE, OUTPUT);
-	hwPinMode(PIN_CCS811_RESET, OUTPUT);
 	strongNode.before();
 
 	NRF_NFCT->TASKS_DISABLE = 1;
@@ -174,41 +167,6 @@ void setup() {
 	}
 	wait(2000);
 	CORE_DEBUG("\n*************** Start NRF52 mysUniSensor *************** \n\n");
-
-	digitalWrite(PIN_CCS811_WAKE, LOW);
-	digitalWrite(PIN_CCS811_RESET, LOW);
-	wait(100);
-	digitalWrite(PIN_CCS811_RESET, HIGH);
-	
-	wait(1000);
-	if(!ccs.begin())
-		CORE_DEBUG("Failed to start CCS811! Please check your wiring.\n");
-	else CORE_DEBUG("Start CCS811! *********************\n");		
-	while(!ccs.available()) {
-		CORE_DEBUG("Wait to CCS811 available...\n");
-		wait(1000);
-	}
-	float temp = ccs.calculateTemperature();
-	CORE_DEBUG("CCS811 calculateTemperature: %f\n", temp);
-	ccs.setTempOffset(temp - 25.0);
-	while(1) {
-		while(!ccs.available()) { CORE_DEBUG("CCS811 available ERROR!\n"); wait(1000); }
-		CORE_DEBUG("CCS811 ok!\n");
-		float temp = ccs.calculateTemperature();
-		uint8_t err = ccs.readData();
-		if (!err){
-			CORE_DEBUG("CCS811 CO2: %ippm TVOC: %ippb, %foС\n", ccs.geteCO2(), ccs.getTVOC(), temp);
-		}
-		else {
-			CORE_DEBUG("CCS811 read ERROR %i ...init\n",err);
-			digitalWrite(PIN_CCS811_RESET, LOW);
-			wait(100);
-			digitalWrite(PIN_CCS811_RESET, HIGH);
-			ccs.begin();
-		}			
-	 	wait(2000);
-	}
-
 
 	interruptedSleep.addPin(PIR_PIN, NRF_GPIO_PIN_PULLDOWN, CDream::NRF_PIN_LOW_TO_HIGH); // добавляем описание пинов
 	interruptedSleep.init();
@@ -239,6 +197,7 @@ void loop() {
 	static uint32_t pirSendTime = 0;
 
 	const uint32_t tSleepStart = millis();
+
 	const int8_t wakeupReson = interruptedSleep.run(INTERVAL_MEASUREMENT, INTERVAL_WDT, false);
 	if (wakeupReson != MY_WAKE_UP_BY_TIMER){
 		CORE_DEBUG("*************** WAKE_UP_BY %i\n", wakeupReson);
@@ -265,31 +224,6 @@ void loop() {
 		interruptedSleep.enableInterrupt();
 	}
 
-
-	// const int8_t wakeupReson = interruptedSleep.run(measuremetInterval > INTERVAL_MEASUREMENT ? measuremetInterval = INTERVAL_MEASUREMENT : measuremetInterval, INTERVAL_WDT, false);
-	// if (wakeupReson == MY_WAKE_UP_BY_TIMER){
-    //     CORE_DEBUG("*************** WAKE_UP_BY_TIMER\n");
-	// 	sendMeasurement();
-	// 	measuremetInterval = INTERVAL_MEASUREMENT;
-	// 	interruptedSleep.enableInterrupt();
-    // }
-	// else {
-	// 	const uint32_t t = millis();
-	// 	measuremetInterval -= (t - tSleepStart); // скока времени еще спать до измерения
-	// 	//if (measuremetInterval > INTERVAL_MEASUREMENT)  measuremetInterval = INTERVAL_MEASUREMENT; // защита от переполнения беззнакового
-	// 	//if (pirSendTime == 0 || t - pirSendTime > INTERVAL_PIR_SEND){ // если проснулись первый раз или после остывания
-	// 	digitalWrite(LED_B, LOW);
-	// 	wait(50);
-	// 	digitalWrite(LED_B, HIGH);	
-	// 	bool sendOk = strongNode.sendMsg(msgMotion.set(true), 5);
-	// 	errLed(!sendOk);
-	// 	if (sendOk){ 
-	// 		pirSendTime = t;
-	// 		interruptedSleep.disableInterrupt();
-	// 	}
-	// 	//}
-	// 	CORE_DEBUG("*************** WAKE_UP_BY %i, time remain %i of %i \n", wakeupReson,  measuremetInterval, INTERVAL_MEASUREMENT);
-	// }
 }
 
 void receive(const MyMessage & message){
@@ -299,6 +233,8 @@ void receive(const MyMessage & message){
 int nDevices;
 
 void i2cScanner() {
+	//Wire.begin();	*********************************************************** !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 	byte error, address;
 
 	CORE_DEBUG("\n***************Scanning"); //Serial.print("___");

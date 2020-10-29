@@ -3,6 +3,6 @@
     "output": "./.output",
     "configuration": "bootcode=none,lfclk=lfxo,reset=notenable",
     "sketch": "mysUniSensor.ino",
-    "port": "COM15",
+    "port": "COM7",
     "programmer": "J-Link"
 }

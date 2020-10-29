@@ -1,0 +1,16 @@
+wdt_enable(timeout) \
+	NRF_WDT->CONFIG = NRF_WDT->CONFIG = (WDT_CONFIG_HALT_Pause << WDT_CONFIG_HALT_Pos) | ( WDT_CONFIG_SLEEP_Run << WDT_CONFIG_SLEEP_Pos); \
+	NRF_WDT->CRV = (32768*timeout)/1000; \
+	NRF_WDT->RREN |= WDT_RREN_RR0_Msk;  \
+	NRF_WDT->TASKS_START = 1
+
+static __INLINE void wdt_init(void)
+{
+  #ifdef WDTENABLE
+  NRF_WDT->CONFIG = (WDT_CONFIG_HALT_Pause << WDT_CONFIG_HALT_Pos) | ( WDT_CONFIG_SLEEP_Run << WDT_CONFIG_SLEEP_Pos);
+  NRF_WDT->CRV = 35 * 32768;
+  NRF_WDT->RREN |= WDT_RREN_RR0_Msk;
+  NRF_WDT->TASKS_START = 1;
+  #endif
+}
+
