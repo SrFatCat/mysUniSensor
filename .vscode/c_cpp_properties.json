@@ -7,6 +7,8 @@
                 "C:\\Users\\Alex\\AppData\\Local\\Arduino15\\packages\\sandeepmistry\\hardware\\nRF5\\0.6.0\\**",
                 "C:\\Users\\Alex\\AppData\\Local\\Arduino15\\packages\\MySensors\\hardware\\nRF5\\0.3.0\\**",
                 "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\mysEfektaLib\\**",
+                "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\MAX44009\\**",
+                "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\Adafruit_CCS811_Library\\**",
                 "${workspaceRoot}"
             ],
             "browse": {
@@ -17,6 +19,7 @@
                     "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\DallasTemperature\\**",
                     "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\OneWire\\**",
                     "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\BH1750FVI\\**",
+                    "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\MAX44009\\**",
                     "C:\\Users\\Alex\\Documents\\Arduino\\libraries\\mysEfektaLib\\**",
                     "C:\\Users\\Alex\\AppData\\Local\\Arduino15\\packages\\sandeepmistry\\hardware\\nRF5\\0.6.0\\cores\\nRF5\\SDK\\components\\device\\"
                 ]

@@ -1,7 +1,7 @@
 /*
  Name:		mysUniSensor.ino
  Created:	06.02.2020 
- Edited: 	06.05.2020
+ Edited: 	06.10.2020
  Author:	Alexey Bogdan aka Sr.FatCat
 
 Первая версия моей платки, пока только датчик температурки, датчик светика и немного движухи
@@ -9,7 +9,7 @@
 */
 
 #define MY_PROJECT_NAME "Uni sensor"
-#define MY_PROJECT_VERSION "1.1"
+#define MY_PROJECT_VERSION "1.4"
 
 //#define MY_DEBUG
 #ifndef MY_DEBUG
@@ -17,7 +17,7 @@
 #endif
 
 #define MY_NODE_ID 11
-#define MY_PARENT_NODE_ID 50
+//#define MY_PARENT_NODE_ID 50
 #define MY_RADIO_NRF5_ESB
 
 int16_t myTransportComlpeteMS;
@@ -26,20 +26,30 @@ int16_t myTransportComlpeteMS;
 #define MY_SEND_BATTERY 253
 //#define MY_SEND_RSSI 254
 
+
+#define LIGHT_SENSOR_BH // определен - BH1750FVI, нет - MAX44009
 #include <DallasTemperature.h>
 #include <OneWire.h>
 #include <MySensors.h>
 #include <efektaGpiot.h>
 #include <strongNode.h>
 #include <Wire.h>
+#ifdef LIGHT_SENSOR_BH
 #include <BH1750FVI.h>
+#else
+#include <Max44009.h>
+#endif
 
 #define INTERVAL_MEASUREMENT (15*60000UL) //15 min
-#define INTERVAL_PIR_COOLING 30000UL
-#define MAX_INTERVAL_PIR_COOLING (4 * INTERVAL_PIR_COOLING)
+//#define INTERVAL_PIR_SEND (2 * 60000UL) //2 min
 #define INTERVAL_WDT 100000
+#define ALL_RESET_INTERVAL (4*24*3600*1000UL) // через 4-ро суток
 
+#ifdef LIGHT_SENSOR_BH
 BH1750FVI LightSensor(BH1750FVI::k_DevModeOneTimeHighRes);
+#else
+Max44009 LightSensor(0x4A);
+#endif
 
 #define ONE_WIRE_BUS 12
 OneWire oneWire(ONE_WIRE_BUS); // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
@@ -61,14 +71,6 @@ void strongPresentation();
 CStrongNode strongNode(100, strongPresentation);
 CDream interruptedSleep(1); // количество пинов по которым будут прерывания сна
 
-void powerManagment(){
-	CORE_DEBUG("*************** SQ: %i%%\n", strongNode.getSignalQuality());
-	if (strongNode.getSignalQuality() > 25)
-		NRF_POWER->DCDCEN = 1;
-	else
-		NRF_POWER->DCDCEN = 0;
-}
-
 void errLed(uint8_t errNum){
 	if (errNum == 0) return;
 
@@ -81,18 +83,18 @@ void errLed(uint8_t errNum){
 	}
 }
 
-uint8_t sendMeasurement() {
+uint8_t sendMeasurement(bool enableLED = true) {
 	static float pTemperature = -127.0;
 	static uint16_t pLight = 0xFFFF; 
 	int ret = 0;
 	bool isSendTemp = false;
 
-	digitalWrite(LED_G, LOW);
+	if (enableLED) digitalWrite(LED_G, LOW);
 	
 	ds18b20.requestTemperatures();
 	int16_t conversionTime = ds18b20.millisToWaitForConversion(ds18b20.getResolution());
 	wait(50);
-	digitalWrite(LED_G, HIGH);
+	if (enableLED) digitalWrite(LED_G, HIGH);
 	if (conversionTime > 50) wait(conversionTime-50);
 
 	float temperature = ds18b20.getTempCByIndex(0);
@@ -108,23 +110,32 @@ uint8_t sendMeasurement() {
 		CORE_DEBUG("*************** ERR: not get temperature\n");
 	}
 
+#ifdef LIGHT_SENSOR_BH
 	LightSensor.Reset();
 	LightSensor.SetMode(BH1750FVI::k_DevModeOneTimeHighRes);
 	wait(500);
 	uint16_t light = LightSensor.GetLightIntensity();
 	LightSensor.Sleep();
-	if (isSendTemp) strongNode.takeVoltage();
+#else
+	uint16_t light = LightSensor.getLux();
+	if (LightSensor.getError()) {
+		CORE_DEBUG("*************** Light sensor ERR = %i LUX\n", LightSensor.getError());
+		light = pLight;
+	}
+#endif
+
+	if (isSendTemp && enableLED) strongNode.takeVoltage();
 
 	CORE_DEBUG("*************** Light intensity = %i LUX\n", light);
 	if (light != pLight) {
 		if(strongNode.sendMsg(msgLight.set(light))) pLight = light; else ret++;
-		if (!isSendTemp) strongNode.takeVoltage();
+		if (!isSendTemp && enableLED) strongNode.takeVoltage();
 	}
 
 	//strongNode.sendSignalStrength();
 	strongNode.sendBattery();
 
-	errLed(ret);
+	if (enableLED) errLed(ret);
 
 	return ret;
 }
@@ -137,6 +148,11 @@ void before(){
 	}
 	hwPinMode(PIR_PIN, INPUT);
 	strongNode.before();
+
+	NRF_NFCT->TASKS_DISABLE = 1;
+	NRF_NVMC->CONFIG = 1;
+	NRF_UICR->NFCPINS = 0;
+	NRF_NVMC->CONFIG = 0;
 }
 
 void strongPresentation() {
@@ -152,8 +168,8 @@ void setup() {
 	}
 	wait(2000);
 	CORE_DEBUG("\n*************** Start NRF52 mysUniSensor *************** \n\n");
-	
-	interruptedSleep.addPin(PIR_PIN, NRF_GPIO_PIN_NOPULL, CDream::NRF_PIN_LOW_TO_HIGH); // добавляем описание пинов
+
+	interruptedSleep.addPin(PIR_PIN, NRF_GPIO_PIN_PULLDOWN, CDream::NRF_PIN_LOW_TO_HIGH); // добавляем описание пинов
 	interruptedSleep.init();
 	
 	strongNode.setup();
@@ -163,12 +179,14 @@ void setup() {
 	ds18b20.begin();
 	ds18b20.setResolution(12);
 	ds18b20.setWaitForConversion(false);
+
+#ifdef LIGHT_SENSOR_BH
 	LightSensor.begin();
-	// while(1){
-	// 	sendMeasurement();
-	// 	sleep(5000);
-	// 	wdt_reset();
-	// }
+#else
+	Wire.begin();
+	LightSensor.setAutomaticMode();
+	//LightSensor.setContinuousMode();
+#endif	
 	sendMeasurement();
 	CORE_DEBUG("*************** SQ: %i%%\n", strongNode.getSignalQuality());
 	//powerManagment();
@@ -177,52 +195,50 @@ void setup() {
 void loop() {
 	static bool isSendMotionOFF = true;
 	static uint32_t measuremetInterval = INTERVAL_MEASUREMENT;
-	static uint32_t intervalPirCooling = 0;
-	static uint32_t tCoolingStart = 0;
+	static uint32_t pirSendTime = 0;
 
 	const uint32_t tSleepStart = millis();
 
-	const int8_t wakeupReson = interruptedSleep.run(measuremetInterval > INTERVAL_MEASUREMENT ? measuremetInterval = INTERVAL_MEASUREMENT : measuremetInterval, INTERVAL_WDT, false);
-	if (wakeupReson == MY_WAKE_UP_BY_TIMER){
-        CORE_DEBUG("*************** WAKE_UP_BY_TIMER\n");
-		//if (!isSendMotionOFF) isSendMotionOFF = strongNode.sendMsg(msgMotion.set(false), 5); //если раньше не удалось отправить PIR в 0 повторяем
-		sendMeasurement();
-		//powerManagment();
-		measuremetInterval = INTERVAL_MEASUREMENT;
-    }
-	else {
-		const uint32_t t = millis();
-		measuremetInterval -= (t - tSleepStart); // скока времени еще спать до измерения
-		//if (measuremetInterval > INTERVAL_MEASUREMENT)  measuremetInterval = INTERVAL_MEASUREMENT; // защита от переполнения беззнакового
-		if (intervalPirCooling == 0 || (t - tCoolingStart) > intervalPirCooling){ // если проснулись первый раз или после остывания
-			digitalWrite(LED_B, LOW);
-			wait(50);
-			digitalWrite(LED_B, HIGH);	
-			bool sendOk = strongNode.sendMsg(msgMotion.set(true), 5);
-			errLed(!sendOk);
-			if (sendOk){
-				 intervalPirCooling = INTERVAL_PIR_COOLING;
-				 tCoolingStart = t;
-			}
-			if(!sendOk && ((t - tCoolingStart) > intervalPirCooling)) intervalPirCooling = 0;
+	const int8_t wakeupReson = interruptedSleep.run(INTERVAL_MEASUREMENT, INTERVAL_WDT, false);
+	if (wakeupReson != MY_WAKE_UP_BY_TIMER){
+		CORE_DEBUG("*************** WAKE_UP_BY %i\n", wakeupReson);
+		digitalWrite(LED_B, LOW);
+		wait(50);
+		digitalWrite(LED_B, HIGH);	
+		bool sendOk = strongNode.sendMsg(msgMotion.set(true), 5);
+		if (!sendOk){
+			CORE_DEBUG("*************** try STRONG send\n", wakeupReson);
+			NRF_POWER->DCDCEN = 0;
+			wait(10);
+			sendOk = strongNode.sendMsg(msgMotion.set(true), 5);
+			NRF_POWER->DCDCEN = 1;
 		}
-		else {
-			intervalPirCooling += INTERVAL_PIR_COOLING;
-			if (intervalPirCooling > MAX_INTERVAL_PIR_COOLING) intervalPirCooling = MAX_INTERVAL_PIR_COOLING;
-			tCoolingStart = t;
-		} 
-		CORE_DEBUG("*************** WAKE_UP_BY %i, time remain %i of %i, PIR COOLING %i of %i \n", wakeupReson,  measuremetInterval, INTERVAL_MEASUREMENT, (t - tCoolingStart), intervalPirCooling);
+		errLed(!sendOk);
+		if (sendOk)	interruptedSleep.disableInterrupt();
 	}
+	const uint32_t t = millis();
+	if (t - tSleepStart > INTERVAL_MEASUREMENT / 2 /*|| wakeupReson == MY_WAKE_UP_BY_TIMER*/){
+		sendMeasurement(wakeupReson == MY_WAKE_UP_BY_TIMER);
+	}
+	if (wakeupReson == MY_WAKE_UP_BY_TIMER){
+		 CORE_DEBUG("*************** WAKE_UP_BY_TIMER\n");
+		interruptedSleep.enableInterrupt();
+	}
+#ifdef ALL_RESET_INTERVAL
+	if (t >= ALL_RESET_INTERVAL) hwReboot();
+#endif
+
 }
 
 void receive(const MyMessage & message){
     if (strongNode.checkAck(message)) return;
 }
 
-/*
 int nDevices;
 
 void i2cScanner() {
+	//Wire.begin();	*********************************************************** !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 	byte error, address;
 
 	CORE_DEBUG("\n***************Scanning"); //Serial.print("___");
@@ -234,7 +250,7 @@ void i2cScanner() {
 		// the Write.endTransmisstion to see if
 		// a device did acknowledge to the address.
 		Wire.beginTransmission(address);
-		//Serial.print("+");
+		Serial.print("+");
 		error = Wire.endTransmission();
 
 		if (error == 0)
@@ -254,12 +270,15 @@ void i2cScanner() {
 		CORE_DEBUG("\n***************%i device done\n\n", nDevices);
 }
 
+/*
 прежде всего модуль должен соответствовать схеме dc-dc, например для модулей от ебайта 52832 нужно допаивпть индуктивности, есть только выводы 
 на пады, на модулях от скайлаб 52840 есть места под индуктивности на модуле, там надо их туда допаивпть. а дальше все просто:
 NRF_POWER->DCDCEN = 1;
 
 причем иногда я его выключаю для презентации(NRF_POWER->DCDCEN = 0;) а потом опять включаю
+*/
 
+/*
 
 void startTimer(uint sec){
 	//NRF_TIMER1->POWER = 1;
