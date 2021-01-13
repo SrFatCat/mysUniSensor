@@ -1,7 +1,7 @@
 /*
  Name:		mysUniSensor.ino
  Created:	06.02.2020 
- Edited: 	06.10.2020
+ Edited: 	09.01.2021
  Author:	Alexey Bogdan aka Sr.FatCat
 
 Первая версия моей платки, пока только датчик температурки, датчик светика и немного движухи
@@ -9,7 +9,7 @@
 */
 
 #define MY_PROJECT_NAME "Uni sensor"
-#define MY_PROJECT_VERSION "1.4"
+#define MY_PROJECT_VERSION "1.6"
 
 //#define MY_DEBUG
 #ifndef MY_DEBUG
@@ -41,9 +41,10 @@ int16_t myTransportComlpeteMS;
 #endif
 
 #define INTERVAL_MEASUREMENT (15*60000UL) //15 min
-//#define INTERVAL_PIR_SEND (2 * 60000UL) //2 min
+#define INTERVAL_PIR_SEND (2 * 60000UL) //2 min
 #define INTERVAL_WDT 100000
 #define ALL_RESET_INTERVAL (4*24*3600*1000UL) // через 4-ро суток
+#define SLEEP_TIME() (t-tMeasurementStart)
 
 #ifdef LIGHT_SENSOR_BH
 BH1750FVI LightSensor(BH1750FVI::k_DevModeOneTimeHighRes);
@@ -176,7 +177,7 @@ void setup() {
 	
 	NRF_POWER->DCDCEN = 1;
 
-	ds18b20.begin();
+	/*ds18b20.begin();
 	ds18b20.setResolution(12);
 	ds18b20.setWaitForConversion(false);
 
@@ -187,21 +188,19 @@ void setup() {
 	LightSensor.setAutomaticMode();
 	//LightSensor.setContinuousMode();
 #endif	
-	sendMeasurement();
+	sendMeasurement();*/
 	CORE_DEBUG("*************** SQ: %i%%\n", strongNode.getSignalQuality());
 	//powerManagment();
 }
 
 void loop() {
-	static bool isSendMotionOFF = true;
-	static uint32_t measuremetInterval = INTERVAL_MEASUREMENT;
-	static uint32_t pirSendTime = 0;
+static uint32_t sleepInterval = INTERVAL_MEASUREMENT;
+	static uint32_t tMeasurementStart = millis();
 
-	const uint32_t tSleepStart = millis();
-
-	const int8_t wakeupReson = interruptedSleep.run(INTERVAL_MEASUREMENT, INTERVAL_WDT, false);
+	const int8_t wakeupReson = interruptedSleep.run(sleepInterval > INTERVAL_MEASUREMENT ? sleepInterval = INTERVAL_MEASUREMENT : sleepInterval, INTERVAL_WDT, false);
+	const uint32_t t = millis();
+	CORE_DEBUG("*************** WAKE_UP_BY %i\n", wakeupReson);
 	if (wakeupReson != MY_WAKE_UP_BY_TIMER){
-		CORE_DEBUG("*************** WAKE_UP_BY %i\n", wakeupReson);
 		digitalWrite(LED_B, LOW);
 		wait(50);
 		digitalWrite(LED_B, HIGH);	
@@ -214,14 +213,23 @@ void loop() {
 			NRF_POWER->DCDCEN = 1;
 		}
 		errLed(!sendOk);
-		if (sendOk)	interruptedSleep.disableInterrupt();
+		if (sendOk)	{
+			interruptedSleep.disableInterrupt();
+			if (SLEEP_TIME() + INTERVAL_PIR_SEND >= INTERVAL_MEASUREMENT){
+				sleepInterval = INTERVAL_MEASUREMENT - SLEEP_TIME();
+			}
+			else sleepInterval = INTERVAL_PIR_SEND;
+		}
+		else sleepInterval = INTERVAL_MEASUREMENT - SLEEP_TIME();
 	}
-	const uint32_t t = millis();
-	if (t - tSleepStart > INTERVAL_MEASUREMENT / 2 /*|| wakeupReson == MY_WAKE_UP_BY_TIMER*/){
-		sendMeasurement(wakeupReson == MY_WAKE_UP_BY_TIMER);
-	}
-	if (wakeupReson == MY_WAKE_UP_BY_TIMER){
-		 CORE_DEBUG("*************** WAKE_UP_BY_TIMER\n");
+	else {
+		if (SLEEP_TIME() >= INTERVAL_MEASUREMENT){
+			sleepInterval = INTERVAL_MEASUREMENT;
+			tMeasurementStart = t;
+			//sendMeasurement(true);
+			sendHeartbeat(true);
+		}
+		else sleepInterval = INTERVAL_MEASUREMENT - SLEEP_TIME();
 		interruptedSleep.enableInterrupt();
 	}
 #ifdef ALL_RESET_INTERVAL
